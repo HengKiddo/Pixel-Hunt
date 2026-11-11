@@ -1,12 +1,13 @@
 require('dotenv').config();
 const express=require('express'),mongoose=require('mongoose'),crypto=require('crypto');
-require('./models/gearItemSchema'); // registers ShopItem (with itemId)
-const Profile=require('./models/profileSchema'),Item=require('./models/itemSchema'),Shop=mongoose.model('ShopItem');
-const quests=require('./utils/questManager');
-const Skill=require('./models/skillItemSchema'),Gear=mongoose.model('GearItem');
+require('./gearItemSchema'); // registers ShopItem (with itemId)
+const Profile=require('./profileSchema'),Item=require('./itemSchema'),Shop=mongoose.model('ShopItem');
+const quests=require('./questManager');
+const Skill=require('./skillItemSchema'),Gear=mongoose.model('GearItem');
 const SS=process.env.SESSION_SECRET||'local-dev-secret';
 const SEC=(process.env.RENDER||process.env.NODE_ENV==='production'||String(process.env.BASE_URL||'').startsWith('https'))?'; Secure':'';
-const app=express();app.set('trust proxy',1);app.use(express.json());app.use(express.static('public'));
+const app=express();app.set('trust proxy',1);app.use(express.json());const path=require('path'),page=f=>(q,s)=>s.sendFile(path.join(__dirname,f));
+app.get('/',page('index.html'));app.get('/game-extra.js',page('game-extra.js')); // only these two files are public
 const sign=v=>v+'.'+crypto.createHmac('sha256',SS).update(v).digest('hex');
 const unsign=s=>{if(!s)return;const v=s.slice(0,s.lastIndexOf('.'));return sign(v)===s?v:undefined};
 const cookie=r=>Object.fromEntries((r.headers.cookie||'').split('; ').filter(Boolean).map(c=>{const i=c.indexOf('=');return[c.slice(0,i),decodeURIComponent(c.slice(i+1))]}));
@@ -329,10 +330,10 @@ app.post('/api/battle/act',auth,wrap(async(q,s)=>{const m=BT[q.body.id],bad=x=>v
  m.turn=1-me;m.t=Date.now();s.json({ok:1})}));
 
 // ---- admin (unlock with ADMIN_PASSWORD from .env) ----
-const AP=process.env.ADMIN_PASSWORD||'admin123';
-if(!process.env.ADMIN_PASSWORD)console.log('NOTE: using the default admin password "admin123". Create a .env file with ADMIN_PASSWORD=yourpassword to change it.');
+const AP=process.env.ADMIN_PASSWORD||((process.env.RENDER||process.env.NODE_ENV==='production')?crypto.randomBytes(24).toString('hex'):'admin123'); // online without ADMIN_PASSWORD = admin page locked
+if(!process.env.ADMIN_PASSWORD)console.log(process.env.RENDER||process.env.NODE_ENV==='production'?'NOTE: ADMIN_PASSWORD is not set, so the admin page is locked. Add it in Render > Environment.':'NOTE: using the default admin password "admin123". Create a .env file with ADMIN_PASSWORD=yourpassword to change it.');
 const isAdm=q=>unsign(cookie(q).a)==='admin',AD=process.env.ADMIN_PATH||'/admin',fails={};
-app.get(AD,(q,s)=>s.sendFile(require('path').join(__dirname,'private','admin.html'))); // not linked anywhere in the game
+app.get(AD,(q,s)=>s.sendFile(require('path').join(__dirname,'admin.html'))); // not linked anywhere in the game
 const adm=(q,s,n)=>isAdm(q)?n():s.status(403).json({error:'Admin only. Unlock the admin tab first.'});
 app.get('/api/admin/status',(q,s)=>s.json({admin:isAdm(q)}));
 app.post('/api/admin/login',(q,s)=>{const f=fails[q.ip]||{n:0,until:0};
@@ -376,15 +377,18 @@ app.post('/api/admin/item',adm,wrap(async(q,s)=>{const id=String(q.body.userId),
 
 require('./games2')({app,auth,adm,wrap,Profile,get,crypto,mongoose});
 
+app.get('/healthz',(q,s)=>s.json({ok:mongoose.connection.readyState===1}));
 async function db(){
+ const hosted=!!(process.env.RENDER||process.env.NODE_ENV==='production');
+ if(hosted&&!process.env.MONGODB_SRV)throw new Error('MONGODB_SRV is not set. On Render: open your service > Environment and add MONGODB_SRV with your MongoDB Atlas connection string.');
  const url=process.env.MONGODB_SRV||'mongodb://127.0.0.1:27017/pixelhunt';
- try{await mongoose.connect(url,{serverSelectionTimeoutMS:2500});console.log('DB:',url.replace(/\/\/.*@/,'//***@'));}
- catch(e){if(process.env.MONGODB_SRV)throw new Error('Cannot connect to MONGODB_SRV ('+e.message+')');console.log('No MongoDB found - starting built-in database (first run downloads it once)...');
+ try{await mongoose.connect(url,{serverSelectionTimeoutMS:process.env.MONGODB_SRV?20000:2500});console.log('DB connected:',url.replace(/\/\/.*@/,'//***@').split('?')[0],'| database:',mongoose.connection.name);}
+ catch(e){if(process.env.MONGODB_SRV)throw new Error('Cannot connect to MONGODB_SRV ('+e.message+'). Check: 1) the password in the link is right (no < > around it), 2) Atlas > Network Access allows 0.0.0.0/0, 3) the database user exists.');console.log('No MongoDB found - starting built-in database (first run downloads it once)...');
   const{MongoMemoryServer}=require('mongodb-memory-server'),fs=require('fs');fs.mkdirSync('./localdb',{recursive:true});
   const m=await MongoMemoryServer.create({instance:{dbPath:'./localdb',storageEngine:'wiredTiger'}});
   await mongoose.connect(m.getUri('pixelhunt'));console.log('DB: built-in, saved in ./localdb');}
- if(!await Item.countDocuments())await Item.insertMany(require('./data/items'));
- if(!await Gear.countDocuments())await Gear.insertMany(require('./data/gear'));
- if(!await Skill.countDocuments())await Skill.insertMany(require('./data/skills'));
- if(!await Shop.countDocuments())await Shop.insertMany(require('./data/shop'));}
+ if(!await Item.countDocuments())await Item.insertMany(require('./items'));
+ if(!await Gear.countDocuments())await Gear.insertMany(require('./gear'));
+ if(!await Skill.countDocuments())await Skill.insertMany(require('./skills'));
+ if(!await Shop.countDocuments())await Shop.insertMany(require('./shop'));}
 db().then(()=>{const P=process.env.PORT||3000;app.listen(P,process.env.HOST||(process.env.PORT?'0.0.0.0':'127.0.0.1'),()=>console.log(`\n  Pixel Hunt running -> http://localhost:${P}\n`))}).catch(e=>{console.error('Could not start:',e.message);process.exit(1)});

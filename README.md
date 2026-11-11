@@ -8,31 +8,46 @@
 Admin: http://localhost:3000/admin (not linked in the game). Password = ADMIN_PASSWORD in `.env`
 (copy `.env.example` to `.env`; without it the password is admin123 - change it!). Optional ADMIN_PATH=/secret-path.
 
-## Put it online for free (so friends can play together)
-The game is already multiplayer: every player logs in to the same website and shares one database
-(leaderboard, shop, admin tools). You need two free things: a database and a web host.
+## Put it online for free (MongoDB Atlas + Render)
 
-### 1. Free database - MongoDB Atlas (M0)
-1. Sign up at https://cloud.mongodb.com -> Build a Database -> choose the FREE (M0) plan.
-2. Database Access -> add a user (username + password). Remember them.
-3. Network Access -> Add IP Address -> "Allow access from anywhere" (0.0.0.0/0). Free hosts have no fixed IP.
-4. Connect -> Drivers -> copy the connection string `mongodb+srv://user:pass@cluster.../`
-   and add a database name before the `?`, e.g. `...mongodb.net/pixelhunt?retryWrites=true...`
-   (If this is the same database your old Discord bot used, your old data is there too. Web accounts are
-   stored as `web:yourname`, Discord players keep their Discord IDs.)
+### 1. Database: MongoDB Atlas (free M0)
+Already used Atlas for your Discord bot? Reuse that same connection string (from the bot's `.env`, `MONGODB_SRV=...`)
+and skip to step 2 - old players, coins and items carry over.
+1. https://cloud.mongodb.com -> sign in -> Create a cluster -> choose **M0 / Free**.
+2. **Database Access** -> Add New Database User -> username + password (letters and numbers only is easiest).
+3. **Network Access** -> Add IP Address -> **Allow access from anywhere** (`0.0.0.0/0`). Render has no fixed IP.
+4. **Connect** -> Drivers -> copy the link. It looks like
+   `mongodb+srv://USER:<db_password>@cluster0.abcde.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`
+   Replace `<db_password>` with the real password (remove the `< >`). Optionally put a database name before the `?`:
+   `...mongodb.net/pixelhunt?retryWrites=...`
 
-### 2. Free web host - Render
-1. Put this folder on GitHub (a private repo is fine). `.env` and `node_modules` are already ignored.
-2. https://render.com -> New -> Web Service -> pick your repo. Runtime Node, Build `npm install`, Start `npm start`, plan Free.
-   (Or New -> Blueprint, it reads `render.yaml`.)
-3. Environment variables:
-   - `MONGODB_SRV` = your Atlas connection string
-   - `ADMIN_PASSWORD` = a strong password (admin page is at `https://YOUR-APP.onrender.com/admin`)
-   - `SESSION_SECRET` = any long random text
-4. Deploy. Share the `https://....onrender.com` link with your friends.
+### 2. Put the code on GitHub
+All files are in ONE folder (no subfolders), so GitHub's normal upload works.
+1. https://github.com/new -> name `pixel-hunt` -> Create (or open your existing repo).
+2. **Add file** -> **Upload files** -> **choose your files** -> open the `pixel-bot-web` folder -> press `Ctrl + A` to select
+   every file -> Open. (Leave out `.env` if you made one - that is your password file. `node_modules` is not needed.)
+3. Check the list shows about 20 files (server.js, index.html, game-extra.js, profileSchema.js, ...) -> **Commit changes**.
 
-Notes for the free plan: the site goes to sleep after ~15 minutes with nobody on it and takes about a minute
-to wake up on the next visit. A free pinger such as cron-job.org visiting your URL every 10 minutes keeps it awake.
+### 3. Web host: Render (free)
+1. https://render.com -> sign in with GitHub -> **New +** -> **Blueprint** -> pick the `pixel-hunt` repo.
+   Render reads `render.yaml` and creates the service.
+2. It asks for the secret values:
+   - `MONGODB_SRV` = your Atlas link from step 1
+   - `ADMIN_PASSWORD` = a strong password for `/admin`
+   - `TOPUP_CONTACT` = your contact link for top-ups (optional)
+3. **Apply / Deploy**. In the Logs you should see `DB connected: ...` then `Pixel Hunt running`.
+4. Your site is `https://pixel-hunt-XXXX.onrender.com`. Log in to claim your name first, then share the link.
+   Admin page: `https://pixel-hunt-XXXX.onrender.com/admin`
+
+### If something goes wrong (check Render > Logs)
+- `MONGODB_SRV is not set` -> add it in Render > your service > Environment, then Manual Deploy.
+- `bad auth` / `Authentication failed` -> wrong user or password in the link, or `< >` left in.
+- `querySrv ENOTFOUND` or timeouts -> link copied wrong, or Atlas Network Access is missing `0.0.0.0/0`.
+- Changes to the code: upload the changed files to GitHub again; Render redeploys automatically.
+
+Free plan notes: the site sleeps after ~15 minutes with nobody on it and takes about a minute to wake up.
+A free pinger such as cron-job.org opening `https://YOUR-APP.onrender.com/healthz` every 10 minutes keeps it awake.
+Free Atlas M0 has 512 MB of storage and no backups.
 
 ## Notes on PvP
 - Battles are turn-based and live on the server's memory. If the server restarts or (on the free host) goes to sleep during a

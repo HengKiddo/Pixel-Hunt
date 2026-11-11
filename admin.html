@@ -1,0 +1,56 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>Admin</title>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet"><style>
+:root{--bg:#1a1c2c;--p:#29366f;--l:#3b5dc9;--g:#38b764;--y:#ffcd75;--r:#b13e53;--t:#f4f4f4;--d:#566c86}
+*{box-sizing:border-box;image-rendering:pixelated}
+body{margin:0;background:var(--bg);color:var(--t);font:10px/1.8 'Press Start 2P',monospace;padding:12px;max-width:760px;margin:auto}
+.box{background:var(--p);padding:12px;margin:12px 0;box-shadow:0 -4px 0 0 #000,0 4px 0 0 #000,-4px 0 0 0 #000,4px 0 0 0 #000,inset 0 -4px 0 0 #1d2b53}
+h1{font-size:16px;color:var(--y);text-shadow:3px 3px #000;margin:0}
+button{font:inherit;color:#fff;background:var(--l);border:0;padding:8px 10px;margin:3px;cursor:pointer;box-shadow:0 -3px 0 #000,0 3px 0 #000,-3px 0 0 #000,3px 0 0 #000,inset 0 -3px 0 #1d2b53}
+button:active{transform:translateY(3px)}button:disabled{background:var(--d);cursor:not-allowed}
+.g{background:var(--g)}.y{background:var(--y);color:#000}.r{background:var(--r)}
+input{font:inherit;font-family:'Press Start 2P','Khmer OS',sans-serif;width:190px;padding:6px;background:#0c0e1a;color:var(--y);border:3px solid #000}
+.bar{height:14px;background:#000;margin:6px 0}.bar i{display:block;height:100%;background:var(--g)}
+.row{display:flex;align-items:center;gap:8px;margin:6px 0;flex-wrap:wrap}
+canvas{width:32px;height:32px}.sp{flex:1}
+#log{min-height:70px;color:var(--y)}.tab.on{background:var(--y);color:#000}
+.common{color:#ccc}.uncommon{color:#7bd}.rare{color:#6f6}.epic{color:#c8f}.legendary{color:var(--y)}.penalty{color:var(--r)}
+#scene{width:100%;height:auto;display:block;margin-bottom:8px;box-shadow:0 0 0 3px #000}select{font:inherit;font-size:9px;background:#0c0e1a;color:var(--y);border:3px solid #000;padding:6px;max-width:100%}.chips{display:flex;flex-wrap:wrap;gap:2px;width:100%}.chips button{font-size:8px;padding:7px 8px}.chips button.on{background:var(--y);color:#000}.chips .nr{background:var(--r)}.chips .nb{background:#1a1c2c}.chips .ng{background:var(--g)}.scroll{max-height:170px;overflow-y:auto;padding:4px;background:#1d2b53}#cz{width:100%;height:auto;display:block;margin-bottom:8px;box-shadow:0 0 0 3px #000}.tab3.on{background:var(--y);color:#000}#login{text-align:center;padding:30px 0}a{color:var(--y)}
+
+.chips{display:flex;flex-wrap:wrap;gap:2px;width:100%}.chips button{font-size:8px;padding:7px 8px}
+select{font:inherit;font-size:9px;background:#0c0e1a;color:var(--y);border:3px solid #000;padding:6px;max-width:100%}</style></head><body>
+<h1>🛠 ADMIN</h1><small>Private page. Not linked from the game.</small>
+<div class="box" id="al"><b>Admin password</b><div class="row"><input id="apw" type="password" placeholder="password"><button class="g" id="aunlock">UNLOCK</button></div><p id="ae" class="penalty"></p></div>
+<div id="ap" hidden>
+ <div class="box"><b>FIND PLAYER</b><div class="row"><input id="aq" placeholder="name (empty = all)"><button id="asr">SEARCH</button></div><div id="alist" class="chips"></div></div>
+ <div class="box" id="abag">Pick a player above to see their bag.</div>
+ <div class="box"><b>MONEY</b><div class="row"><input id="am" placeholder="amount"><button class="g" id="agm">GIVE</button><button class="r" id="arm">REMOVE</button></div>
+ <b>ITEMS</b><div class="row"><select id="ak"><option value="animal">Animal</option><option value="shovel">Shovel</option></select><select id="ai"></select><input id="aqty" value="1" style="width:70px"><button class="g" id="agi">GIVE</button><button class="r" id="ari">REMOVE</button></div></div>
+ <div class="box"><b>📢 ANNOUNCEMENT</b><div><small>Shows as a yellow banner for every player (kept 7 days, newest 3).</small></div><textarea id="antext" maxlength="500" rows="3" style="width:100%;font:inherit;font-size:10px;background:#0c0e1a;color:var(--y);border:3px solid #000;padding:6px"></textarea><div class="row"><button class="g" id="anpost">POST</button><button class="r" id="anclear">REMOVE ALL</button></div></div>
+ <div class="box"><b>💎 TOP-UP REQUESTS</b> <button id="tpref">REFRESH</button><div id="tplist"><small>Loading...</small></div></div>
+ <div class="box" id="alog">Admin log.</div></div>
+<script>
+const $=i=>document.getElementById(i),n=x=>Number(x).toLocaleString(),esc=s=>String(s).replace(/[&<>"']/g,c=>'&#'+c.charCodeAt(0)+';'),alog=h=>$('alog').innerHTML=h;let ad={sel:null,cat:null};
+async function api(u,b){const r=await fetch(u,b?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}:{});if(r.status===403){$('al').hidden=false;$('ap').hidden=true;throw 0}return r.json()}
+async function start(){const r=await api('/api/admin/status');$('al').hidden=r.admin;$('ap').hidden=!r.admin;if(!r.admin)return;if(!ad.cat)ad.cat=await api('/api/admin/catalog');fillCat();search()}
+$('aunlock').onclick=async()=>{const r=await api('/api/admin/login',{password:$('apw').value});if(r.error)$('ae').textContent=r.error;else{$('apw').value='';$('ae').textContent='';start()}};
+$('apw').addEventListener('keydown',e=>{if(e.key==='Enter')$('aunlock').click()});
+function fillCat(){const c=ad.cat;$('ai').innerHTML=($('ak').value==='animal'?c.animals.map(a=>`<option value="${esc(a.name)}">${a.emoji} ${esc(a.name)} (${a.rarity})</option>`):c.shovels.map(a=>`<option value="${a.itemId}">${esc(a.name)}</option>`)).join('')}
+$('ak').onchange=fillCat;
+async function search(){const L=await api('/api/admin/players?q='+encodeURIComponent($('aq').value));const l=$('alist');l.innerHTML='';
+ if(!L.length)l.textContent='No players found.';L.forEach(p=>{const b=document.createElement('button');b.textContent=`${p.username||p.userId} · ${n(p.balance)}`;b.onclick=()=>pick(p.userId);l.append(b)})}
+$('asr').onclick=search;$('aq').addEventListener('keydown',e=>{if(e.key==='Enter')search()});
+async function pick(id){ad.sel=id;const p=await api('/api/admin/player?id='+encodeURIComponent(id));if(p.error)return $('abag').textContent=p.error;
+ $('abag').innerHTML=`<b>${esc(p.username||p.userId)}</b> <small>(${esc(p.userId)})</small><br>WALLET ${n(p.balance)} · BANK ${n(p.bank)} · LV ${p.level} (${n(p.xp)} XP)<br><br><b>BAG - ANIMALS</b>`
+ +(p.animals.length?p.animals.sort((a,b)=>b.value-a.value).map(a=>`<div class="${a.rarity}">${a.emoji} ${esc(a.name)} x${a.qty} <small>(${n(a.value)} each)</small></div>`).join(''):'<div>none</div>')
+ +`<br><b>BAG - SHOVELS</b>`+(p.shovels.length?p.shovels.map(x=>`<div>⛏ ${esc(x.name)}${x.itemId===p.equipped?' (equipped)':''}</div>`).join(''):'<div>none</div>')}
+async function aact(u,b){if(!ad.sel)return alog('<span class=penalty>Pick a player first.</span>');const r=await api(u,{userId:ad.sel,...b});alog(r.error?`<span class=penalty>${r.error}</span>`:r.msg);pick(ad.sel)}
+$('agm').onclick=()=>aact('/api/admin/money',{mode:'give',amount:$('am').value});$('arm').onclick=()=>aact('/api/admin/money',{mode:'remove',amount:$('am').value});
+const itm=a=>aact('/api/admin/item',{action:a,kind:$('ak').value,name:$('ai').value,itemId:$('ai').value,qty:$('aqty').value});
+$('agi').onclick=()=>itm('give');$('ari').onclick=()=>itm('remove');
+async function topups(){const L=await api('/api/admin/topups');$('tplist').innerHTML=L.length?L.map(t=>`<div><small>${new Date(t.at).toLocaleString()} · <b>${esc(t.name)}</b> (${esc(t.userId)})</small></div>`).join(''):'<small>No requests yet.</small>'}
+$('tpref').onclick=topups;
+$('anpost').onclick=async()=>{const r=await api('/api/admin/announce',{text:$('antext').value});alog(r.error?`<span class=penalty>${r.error}</span>`:r.msg);if(!r.error)$('antext').value=''};
+$('anclear').onclick=async()=>{if(!confirm('Remove all announcements?'))return;const r=await api('/api/admin/announce/clear',{});alog(r.msg||r.error)};
+const _start=start;start=async()=>{await _start();if(!$('ap').hidden)topups()};
+start().catch(()=>{});
+</script></body></html>

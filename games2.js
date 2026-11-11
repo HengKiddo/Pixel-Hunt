@@ -263,7 +263,7 @@ module.exports = function games2({ app, auth, adm, wrap, Profile, get, crypto, m
   const Topup = mongoose.models.TopupRequest || mongoose.model('TopupRequest', new mongoose.Schema({ userId: String, name: String, at: Number }));
   const Ann = mongoose.models.Announcement || mongoose.model('Announcement', new mongoose.Schema({ text: String, at: Number }));
   const lastTop = {};
-  app.get('/api/topup', auth, (q, s) => s.json({ prices: require('./data/topup'), contact: process.env.TOPUP_CONTACT || 'https://discordapp.com/users/842776245590818886' }));
+  app.get('/api/topup', auth, (q, s) => s.json({ prices: require('./topup'), contact: process.env.TOPUP_CONTACT || 'https://discordapp.com/users/842776245590818886' }));
   app.post('/api/topup/request', auth, wrap(async (q, s) => {
     if (Date.now() - (lastTop[q.u.id] || 0) < 6e5) return bad(s, 'Request already sent. The admin will contact you.');
     lastTop[q.u.id] = Date.now(); await Topup.create({ userId: q.u.id, name: q.u.name, at: Date.now() });

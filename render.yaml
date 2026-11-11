@@ -3,7 +3,8 @@ services:
     name: pixel-hunt
     runtime: node
     plan: free
-    buildCommand: npm install
+    buildCommand: npm install --omit=optional
+    healthCheckPath: /healthz
     startCommand: npm start
     envVars:
       - key: MONGODB_SRV
@@ -14,3 +15,5 @@ services:
         sync: false
       - key: SESSION_SECRET
         generateValue: true
+      - key: NODE_VERSION
+        value: 22
