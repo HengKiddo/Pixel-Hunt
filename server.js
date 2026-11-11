@@ -17,33 +17,45 @@ const wrap=f=>(q,s)=>f(q,s).catch(e=>{console.error(e);s.status(500).json({error
 const view=(p,u)=>({name:u.name,avatar:u.avatar,balance:p.balance,bank:p.bank,level:p.level,xp:p.xp,need:p.level*1500,
  dailyLeft:Math.max(0,86400000-(Date.now()-(p.dailyLastUsed||0))),huntLeft:Math.max(0,3000-(Date.now()-(p.huntLastUsed||0))),
  shovels:p.shovels,equipped:p.equippedShovel,inventory:p.inventory});
- 
+
 // --- Accounts: name + password (first login with a new name creates the account) ---
 const lf={},hashPw=(p,salt)=>crypto.scryptSync(p,salt,32).toString('hex');
+const badName=name=>name.length<2||/[<>"'`\\\/]/.test(name)?'Name must be 2-20 characters (no < > quotes or slashes).':null,regs={};
+// --- Register: create an account (name + password). Login is a separate step. ---
+app.post('/api/register',wrap(async(q,s)=>{const name=String(q.body.name||'').trim().slice(0,20),pw=String(q.body.password||''),r=regs[q.ip]||{n:0,t:Date.now()};
+ if(Date.now()-r.t>36e5){r.n=0;r.t=Date.now()}if(r.n>=10)return s.status(429).json({error:'Too many new accounts from here. Try again in an hour.'});
+ const bn=badName(name);if(bn)return s.status(400).json({error:bn});
+ if(pw.length<4)return s.status(400).json({error:'Password must be at least 4 characters.'});
+ if(q.body.confirm!==undefined&&String(q.body.confirm)!==pw)return s.status(400).json({error:'The two passwords do not match.'});
+ const id='web:'+name.toLowerCase(),p=await Profile.findOne({userId:id});
+ if(p&&p.passHash)return s.status(400).json({error:'That name is already taken. Pick another name, or LOGIN if it is yours.'});
+ const salt=crypto.randomBytes(16).toString('hex');
+ if(p)await Profile.updateOne({userId:id},{$set:{passHash:hashPw(pw,salt),passSalt:salt,username:p.username||name}});
+ else await Profile.create({userId:id,username:name,passHash:hashPw(pw,salt),passSalt:salt});
+ r.n++;regs[q.ip]=r;s.json({ok:1,msg:`Account "${name}" created! Now log in.`})}));
+// --- Login: only for registered names ---
 app.post('/api/login',wrap(async(q,s)=>{const name=String(q.body.name||'').trim().slice(0,20),pw=String(q.body.password||''),f=lf[q.ip]||{n:0,until:0};
  if(Date.now()<f.until)return s.status(429).json({error:'Too many wrong tries. Wait 10 minutes.'});
- if(name.length<2||/[<>"'`\\\/]/.test(name))return s.status(400).json({error:'Name must be 2-20 characters (no < > quotes or slashes).'});
- if(pw.length<4)return s.status(400).json({error:'Password must be at least 4 characters.'});
- const id='web:'+name.toLowerCase();let p=await Profile.findOne({userId:id}),made=false;
- if(p&&p.passHash){if(hashPw(pw,p.passSalt)!==p.passHash){f.n++;if(f.n>=8){f.until=Date.now()+6e5;f.n=0}lf[q.ip]=f;return void setTimeout(()=>s.status(400).json({error:'Wrong password for this name.'}),500)}}
- else{const salt=crypto.randomBytes(16).toString('hex');
-  if(p)await Profile.updateOne({userId:id},{$set:{passHash:hashPw(pw,salt),passSalt:salt}});else await Profile.create({userId:id,username:name,passHash:hashPw(pw,salt),passSalt:salt});made=true}
+ const bn=badName(name);if(bn)return s.status(400).json({error:bn});
+ const id='web:'+name.toLowerCase(),p=await Profile.findOne({userId:id});
+ if(!p||!p.passHash)return s.status(400).json({error:'No account with this name. Please REGISTER first.'});
+ if(hashPw(pw,p.passSalt)!==p.passHash){f.n++;if(f.n>=8){f.until=Date.now()+6e5;f.n=0}lf[q.ip]=f;return void setTimeout(()=>s.status(400).json({error:'Wrong password for this name.'}),500)}
  lf[q.ip]={n:0,until:0};
- const v=Buffer.from(JSON.stringify({id,name:(p&&p.username)||name,avatar:null})).toString('base64url');
- s.setHeader('Set-Cookie',`s=${encodeURIComponent(sign(v))}; HttpOnly; Path=/; Max-Age=2592000; SameSite=Lax${SEC}`);s.json({ok:1,created:made})}));
+ const v=Buffer.from(JSON.stringify({id,name:p.username||name,avatar:null})).toString('base64url');
+ s.setHeader('Set-Cookie',`s=${encodeURIComponent(sign(v))}; HttpOnly; Path=/; Max-Age=2592000; SameSite=Lax${SEC}`);s.json({ok:1})}));
 app.get('/logout',(q,s)=>{s.setHeader('Set-Cookie',`s=; Path=/; Max-Age=0${SEC}`);s.redirect('/')});
- 
+
 app.get('/api/me',auth,wrap(async(q,s)=>{const p=await get(q.u);if(p.username!==q.u.name)await Profile.updateOne({userId:q.u.id},{$set:{username:q.u.name}});const sh=p.equippedShovel?await Shop.findOne({itemId:p.equippedShovel}):null,e=p.equippedItems||{},g=p.gear||{},
   GN={thieves_gloves:'Thieves Gloves',police_level_1:'Police Level 1'},nm=x=>x&&x!=='none'?(GN[x]||String(x).replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase())):null;
  const rn=async(M,id)=>id&&id!=='none'?(((await M.findOne({itemId:id}))||{}).name||nm(id)):null;
  s.json({...view(p,q.u),equip:{shovel:sh&&sh.name,robGear:nm(e.robGear),policeGear:nm(e.policeGear),weapon:await rn(Gear,g.weapon),armor:await rn(Gear,g.armor),helmet:await rn(Gear,g.helmet),skill:await rn(Skill,g.skill)}})}));
- 
+
 app.post('/api/daily',auth,wrap(async(q,s)=>{const p=await get(q.u);
  if(Date.now()-(p.dailyLastUsed||0)<864e5)return s.status(400).json({error:'Daily already claimed.'});
  const r=5000+Math.floor(Math.random()*45001);
  await Profile.updateOne({userId:q.u.id},{$inc:{balance:r},$set:{dailyLastUsed:Date.now()}});
  s.json({msg:`Daily reward: +${r.toLocaleString()} coins!`})}));
- 
+
 app.post('/api/bank',auth,wrap(async(q,s)=>{const p=await get(q.u),{action,amount}=q.body;
  if(!['deposit','withdraw'].includes(action))return s.status(400).json({error:'Bad action.'});
  const from=action==='deposit'?p.balance:p.bank;
@@ -53,7 +65,7 @@ app.post('/api/bank',auth,wrap(async(q,s)=>{const p=await get(q.u),{action,amoun
  const d=action==='deposit'?n:-n;
  await Profile.updateOne({userId:q.u.id},{$inc:{balance:-d,bank:d}});
  s.json({msg:`${action==='deposit'?'Deposited':'Withdrew'} ${n.toLocaleString()} coins.`})}));
- 
+
 // [legendary, epic, uncommon, common, items per hunt]  (same numbers as hunt.js)
 const XPB=1.5; // all animal XP is +50%
 const SH={'Beginner Shovel':[0,0,2,-2,1],'Wooden Shovel':[0,0,4,-4,0],'Iron Shovel':[0,2,6,-8,2],'Stone Shovel':[0,4,8,-12,3],
@@ -78,7 +90,7 @@ app.post('/api/hunt',auth,wrap(async(q,s)=>{const p=await get(q.u),now=Date.now(
  const upd={$inc:{balance:pay},$set:{huntLastUsed:now,level:lv,xp}};if(add.length)upd.$push={inventory:{$each:add}};
  await Profile.updateOne({userId:q.u.id},upd);
  s.json({found:found.map(f=>({name:f.name,emoji:f.emoji,rarity:f.rarity,value:f.value,message:f.message})),pay,gain,levelUp:up?lv:null,shovel:sh&&sh.name})}));
- 
+
 app.get('/api/shop',auth,wrap(async(q,s)=>s.json(await Shop.find({}).sort({price:1}))));
 app.post('/api/buy',auth,wrap(async(q,s)=>{const p=await get(q.u),it=await Shop.findOne({itemId:q.body.itemId});
  if(!it)return s.status(404).json({error:'Unknown item.'});
@@ -90,18 +102,18 @@ app.post('/api/buy',auth,wrap(async(q,s)=>{const p=await get(q.u),it=await Shop.
 app.post('/api/equip',auth,wrap(async(q,s)=>{const p=await get(q.u);
  if(!p.shovels.includes(q.body.itemId))return s.status(400).json({error:"You don't own that shovel."});
  await Profile.updateOne({userId:q.u.id},{$set:{equippedShovel:q.body.itemId}});s.json({msg:'Shovel equipped.'})}));
- 
+
 app.post('/api/sell',auth,wrap(async(q,s)=>{const p=await get(q.u),{name,qty}=q.body;let keep=[],sold=[];
  for(const i of p.inventory)((!name||i.name===name)&&(qty==='all'||!name||sold.length<(parseInt(qty)||1))?sold:keep).push(i);
  if(!sold.length)return s.status(400).json({error:'Nothing to sell.'});
  const v=sold.reduce((a,i)=>a+i.value,0);
  await Profile.updateOne({userId:q.u.id},{$inc:{balance:v},$set:{inventory:keep}});
  s.json({msg:`Sold ${sold.length} item(s) for ${v.toLocaleString()} coins.`})}));
- 
+
 app.get('/api/top',auth,wrap(async(q,s)=>{const f=['balance','level','xp'].includes(q.query.by)?q.query.by:'balance';
  s.json((await Profile.find({}).sort({[f]:-1}).limit(10)).map(u=>({name:u.username||'Player '+u.userId.slice(-4),v:u[f]})))}));
- 
- 
+
+
 // ---- casino (rules ported from slots.js, coinflip.js, roulette.js) ----
 async function stake(q,s,fixed){const a=fixed??(q.body.bet==='all'?(await get(q.u)).balance:parseInt(q.body.bet));
  if(!(a>0))return void s.status(400).json({error:'Enter a positive bet.'});
@@ -144,9 +156,9 @@ app.post('/api/roulette',auth,wrap(async(q,s)=>{const b=RB[q.body.type],o=b&&b.l
  if(!o)return s.status(400).json({error:'Pick a valid roulette bet.'});
  const g=await stake(q,s);if(!g)return;const w=R[Math.floor(Math.random()*R.length)],won=o.nums.includes(w);
  await settle(q,s,g,won?g.a*b.pay:-g.a,{result:w,msg:won?`${o.l}: the ball landed on ${w}. You win x${b.pay}!`:`The ball landed on ${w}. Your bet on ${o.l} lost.`})}));
- 
- 
- 
+
+
+
 // ---- pick-a-prize games: 4 Doors and Lucky Gem (rules from 4door.js / luckygem.js) + daily quests ----
 const shuf=a=>{for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a};
 const mk=(id,emoji,label,n=1)=>Array.from({length:n},()=>({id,emoji,label}));
@@ -172,8 +184,8 @@ app.post('/api/quests/claim',auth,wrap(async(q,s)=>{if(busyQ.has(q.u.id))return 
   if(!tot)return s.status(400).json({error:'No new rewards to claim.'});
   await Profile.updateOne({userId:q.u.id},{$inc:{balance:tot},$set:{'quests.daily':L}});s.json({msg:`You claimed ${tot.toLocaleString()} coins!`})}
  finally{busyQ.delete(q.u.id)}}));
- 
- 
+
+
 // ---- auto hunt (rules from autohunt.js): fund workers, they hunt once a minute, claim the loot ----
 const SK=['worker','workerXP','strategy','radar','duration'],SPC=.25,PER=60000;
 const ahInfo=p=>{const a=p.autohunt,now=Date.now(),on=a.startTime>0;
@@ -210,8 +222,8 @@ app.post('/api/autohunt/upgrade',auth,wrap(async(q,s)=>{const k=q.body.skill;if(
  const p=await get(q.u),lv=p.autohunt.skills[k],cost=lv*10000,key='autohunt.skills.'+k;
  if(!await Profile.findOneAndUpdate({userId:q.u.id,balance:{$gte:cost},[key]:lv},{$inc:{balance:-cost,[key]:1}}))return s.status(400).json({error:`You need ${cost.toLocaleString()} coins.`});
  s.json({msg:`${k} is now level ${lv+1}! (-${cost.toLocaleString()} coins)`})}));
- 
- 
+
+
 // ---- gear bag: shovels, rob gear, police gear, weapon, armor, helmet, skill ----
 const slug=n=>String(n).toLowerCase().replace(/ /g,'_');
 app.get('/api/gearbag',auth,wrap(async(q,s)=>{const p=await get(q.u),e=p.equippedItems||{},g=p.gear||{},out={shovels:[],robGear:[],policeGear:[],weapon:[],armor:[],helmet:[],skill:[]};
@@ -231,8 +243,8 @@ app.post('/api/gearbag/equip',auth,wrap(async(q,s)=>{const{kind,id,action}=q.bod
   if(!un&&kind!=='skill'){const it=await Gear.findOne({itemId:id});if(!it||String(it.type).toLowerCase()!==kind)return bad('That item does not fit this slot.')}
   set={['gear.'+kind]:un?'none':id}}
  await Profile.updateOne({userId:q.u.id},{$set:set});s.json({msg:un?'Unequipped.':'Equipped!'})}));
- 
- 
+
+
 // ---- gear shop: battle gear + skills (buy.js) and rob gear (robgearshop.js) ----
 const ROB={loot_bag:{name:'Loot Bag',price:1000000,description:'Grants the ability to rob others.',unique:true},thieves_gloves:{name:'Thieves Gloves',price:2000000,description:'Increases rob success chance by 5%.'},
  police_level_1:{name:'Police Level 1',price:5000000,description:"Decreases a robber's success chance by 10% (when you are robbed)."},time_travel:{name:'Time Travel',price:50000000,description:'Reduces your rob cooldown by 10 seconds.',unique:true}};
@@ -253,7 +265,7 @@ app.post('/api/gearshop/buy',auth,wrap(async(q,s)=>{const{kind,id}=q.body,p=awai
  if(p.level<it.levelRequirement)return bad(`You need level ${it.levelRequirement}.`);
  if(!await Profile.findOneAndUpdate({userId:q.u.id,balance:{$gte:it.price}},{$inc:{balance:-it.price}}))return bad(`You need ${it.price.toLocaleString()} coins.`);
  await Profile.updateOne({userId:q.u.id},{$push:{'gear.inventory':{itemId:id}}});s.json({msg:`Bought ${it.name}!`})}));
- 
+
 // ---- players + rob (rules from rob.js) ----
 app.get('/api/players',auth,wrap(async(q,s)=>{const e=String(q.query.q||'').replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
  s.json((await Profile.find({userId:{$ne:q.u.id},...(e?{username:new RegExp(e,'i')}:{})}).sort({balance:-1}).limit(30).select('username userId balance level'))
@@ -272,7 +284,7 @@ app.post('/api/rob',auth,wrap(async(q,s)=>{const bad=m=>void s.status(400).json(
   await Profile.updateOne({userId:q.u.id},{$inc:{balance:amt}});return s.json({success:true,amount:amt,msg:`You robbed ${tn} and stole ${amt.toLocaleString()} coins!`})}}
  const pen=Math.floor(p.balance*.1);await Profile.updateOne({userId:q.u.id},{$inc:{balance:-pen}});
  s.json({success:false,amount:pen,msg:`${tn} caught you! You lost ${pen.toLocaleString()} coins.`})}));
- 
+
 // ---- battle: turn-based PvP (rules from battle.js; the page polls for updates) ----
 const BT={},UB={};
 async function bside(id,name){const p=await get({id}),st={attack:5,defense:5,hp:0,critChance:5,critDamage:1.5,critDefense:0},
@@ -328,7 +340,7 @@ app.post('/api/battle/act',auth,wrap(async(q,s)=>{const m=BT[q.body.id],bad=x=>v
  if(a.cd>0)a.cd--;if(act!=='skill'&&a.defB>0)a.defB--;
  if(b.hp<=0){await bfinish(m,me);return s.json({ok:1})}
  m.turn=1-me;m.t=Date.now();s.json({ok:1})}));
- 
+
 // ---- admin (unlock with ADMIN_PASSWORD from .env) ----
 const AP=process.env.ADMIN_PASSWORD||((process.env.RENDER||process.env.NODE_ENV==='production')?crypto.randomBytes(24).toString('hex'):'admin123'); // online without ADMIN_PASSWORD = admin page locked
 if(!process.env.ADMIN_PASSWORD)console.log(process.env.RENDER||process.env.NODE_ENV==='production'?'NOTE: ADMIN_PASSWORD is not set, so the admin page is locked. Add it in Render > Environment.':'NOTE: using the default admin password "admin123". Create a .env file with ADMIN_PASSWORD=yourpassword to change it.');
@@ -374,9 +386,9 @@ app.post('/api/admin/item',adm,wrap(async(q,s)=>{const id=String(q.body.userId),
    await Profile.updateOne({userId:id},u);msg=`Removed ${sh.name}.`}}
  else return bad(400,'Bad item kind.');
  console.log(`[admin] ${action} ${kind} -> ${id}: ${msg}`);s.json({msg})}));
- 
+
 require('./games2')({app,auth,adm,wrap,Profile,get,crypto,mongoose});
- 
+
 app.get('/healthz',(q,s)=>s.json({ok:mongoose.connection.readyState===1}));
 // Cleans up a pasted Atlas link: removes leftover < > around user/password and makes symbols like @ : / # % in them safe.
 function fixMongoUrl(u){const m=String(u||'').trim().replace(/^["']|["']$/g,'').match(/^(mongodb(?:\+srv)?:\/\/)(.*)@([^@\/?]+)(.*)$/);if(!m)return String(u||'').trim();
