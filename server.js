@@ -386,13 +386,20 @@ async function db(){
  const hosted=!!(process.env.RENDER||process.env.NODE_ENV==='production');
  if(hosted&&!process.env.MONGODB_SRV)throw new Error('MONGODB_SRV is not set. On Render: open your service > Environment and add MONGODB_SRV with your MongoDB Atlas connection string.');
  const url=process.env.MONGODB_SRV?fixMongoUrl(process.env.MONGODB_SRV):'mongodb://127.0.0.1:27017/pixelhunt';
- try{await mongoose.connect(url,{serverSelectionTimeoutMS:process.env.MONGODB_SRV?20000:2500});console.log('DB connected:',url.replace(/\/\/.*@/,'//***@').split('?')[0],'| database:',mongoose.connection.name);}
+ const opts={serverSelectionTimeoutMS:process.env.MONGODB_SRV?20000:2500,...(process.env.MONGODB_DB?{dbName:process.env.MONGODB_DB}:{})};
+ try{await mongoose.connect(url,opts);console.log('DB connected:',url.replace(/\/\/.*@/,'//***@').split('?')[0],'| database:',mongoose.connection.name);}
  catch(e){if(process.env.MONGODB_SRV)throw new Error('Cannot connect to MONGODB_SRV ('+e.message+'). Check: 1) the password in the link is right (no < > around it), 2) Atlas > Network Access allows 0.0.0.0/0, 3) the database user exists.');console.log('No MongoDB found - starting built-in database (first run downloads it once)...');
   const{MongoMemoryServer}=require('mongodb-memory-server'),fs=require('fs');fs.mkdirSync('./localdb',{recursive:true});
   const m=await MongoMemoryServer.create({instance:{dbPath:'./localdb',storageEngine:'wiredTiger'}});
   await mongoose.connect(m.getUri('pixelhunt'));console.log('DB: built-in, saved in ./localdb');}
- if(!await Item.countDocuments())await Item.insertMany(require('./items'));
- if(!await Gear.countDocuments())await Gear.insertMany(require('./gear'));
- if(!await Skill.countDocuments())await Skill.insertMany(require('./skills'));
- if(!await Shop.countDocuments())await Shop.insertMany(require('./shop'));}
+ const seed=async()=>{
+  if(!await Item.countDocuments())await Item.insertMany(require('./items'));
+  if(!await Gear.countDocuments())await Gear.insertMany(require('./gear'));
+  if(!await Skill.countDocuments())await Skill.insertMany(require('./skills'));
+  if(!await Shop.countDocuments())await Shop.insertMany(require('./shop'));};
+ try{await seed()}
+ catch(e){ // Atlas already has the same database name with different capital letters (e.g. "Test" vs "test"): use the existing one
+  const m=String(e.message).match(/already have: \[([^\]]+)\]/);if(!m)throw e;
+  console.log(`Database "${m[1]}" already exists - using it (it keeps your old data).`);
+  await mongoose.disconnect();await mongoose.connect(url,{...opts,dbName:m[1]});console.log('DB connected | database:',mongoose.connection.name);await seed();}}
 db().then(()=>{const P=process.env.PORT||3000;app.listen(P,process.env.HOST||(process.env.PORT?'0.0.0.0':'127.0.0.1'),()=>console.log(`\n  Pixel Hunt running -> http://localhost:${P}\n`))}).catch(e=>{console.error('Could not start:',e.message);process.exit(1)});
